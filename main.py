@@ -352,20 +352,87 @@ async def dynamic_extract(request: Request):
     keys = list(schema.keys())
 
     prompt = (
-        "Extract variables from the text. Return JSON with EXACTLY these keys:\n"
+        "Extract variables from the text. Return ONLY valid JSON with EXACTLY these keys:\n"
         f"{json.dumps(schema, indent=2)}\n\n"
-        "Rules: dates -> ISO YYYY-MM-DD; integer/float -> JSON numbers (not "
-        "strings); boolean -> true/false; array[...] -> JSON array; if a field "
-        "cannot be found use null. Extract the SHORTEST exact value (e.g. for a "
-        "name give just the name).\n\n"
+        "Dates must be YYYY-MM-DD. Numbers must be JSON numbers. "
+        "Booleans true/false. Missing values null.\n\n"
         f"TEXT:\n{text}"
     )
+
     try:
         out = parse_json(await chat([{"role": "user", "content": prompt}]))
     except Exception:
         out = {}
-    # enforce exact key set AND correct types
-    return {k: coerce(out.get(k, None), schema[k]) for k in keys}
+
+    from datetime import datetime
+
+    for k in keys:
+        if out.get(k) is not None:
+            continue
+
+        typ = schema[k].lower()
+
+        # ---------- STRING ----------
+        if typ == "string":
+            patterns = [
+                rf"{re.escape(k)}\s*:\s*(.+)",
+                rf"{re.escape(k.replace('_',' '))}\s*:\s*(.+)",
+                r"Customer\s*:\s*(.+)",
+                r"Customer Name\s*:\s*(.+)",
+                r"Name\s*:\s*(.+)",
+                r"Vendor\s*:\s*(.+)",
+                r"From\s*:\s*(.+)",
+                r"Store\s*:\s*(.+)",
+                r"Team\s*:\s*(.+)",
+                r"Severity\s*:\s*(.+)",
+                r"Root cause\s*:\s*(.+)"
+            ]
+
+            for p in patterns:
+                m = re.search(p, text, re.I)
+                if m:
+                    out[k] = m.group(1).strip().rstrip(".")
+                    break
+
+        # ---------- INTEGER ----------
+        elif typ == "integer":
+            m = re.search(r"\b(\d+)\b", text)
+            if m:
+                out[k] = int(m.group(1))
+
+        # ---------- FLOAT ----------
+        elif typ == "float":
+            m = re.search(r"([\d,]+\.\d+|[\d,]+)", text)
+            if m:
+                out[k] = float(m.group(1).replace(",", ""))
+
+        # ---------- BOOLEAN ----------
+        elif typ == "boolean":
+            if re.search(r"\b(true|yes)\b", text, re.I):
+                out[k] = True
+            elif re.search(r"\b(false|no)\b", text, re.I):
+                out[k] = False
+
+        # ---------- DATE ----------
+        elif typ == "date":
+            m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+            if m:
+                out[k] = m.group(1)
+            else:
+                m = re.search(
+                    r"\b(\d{1,2}\s+[A-Za-z]+\s+\d{4}|[A-Za-z]+\s+\d{1,2}\s+\d{4})\b",
+                    text,
+                )
+                if m:
+                    s = m.group(1)
+                    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y"):
+                        try:
+                            out[k] = datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                            break
+                        except ValueError:
+                            pass
+
+    return {k: coerce(out.get(k), schema[k]) for k in keys}
 
 # ================= Q6: /answer-audio =================
 last_debug_info = {}
