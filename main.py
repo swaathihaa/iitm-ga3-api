@@ -444,7 +444,7 @@ async def dynamic_extract(request: Request):
             elif "tax" in kl or "gst" in kl:
                 pats = [
                     r"(?:GST|IGST|CGST|SGST)\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Tax\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"\n\s*Tax\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
                 ]
             elif "total" in kl:
                 pats = [
