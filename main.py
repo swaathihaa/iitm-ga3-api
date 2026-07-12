@@ -413,27 +413,43 @@ async def dynamic_extract(request: Request):
 
         # ---------- FLOAT ----------
         elif typ == "float":
-            patterns = [
-                rf"{re.escape(k)}\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-                rf"{re.escape(k.replace('_',' '))}\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-                r"Price\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-                r"Amount\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-                r"Cost\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-                r"Total\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
-            ]
+            kl = k.lower()
 
-            found = False
-            for p in patterns:
+            if "subtotal" in kl:
+                pats = [
+                    r"Subtotal\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Net Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Services rendered\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+            elif "tax" in kl or "gst" in kl:
+                pats = [
+                    r"(?:GST|IGST|CGST|SGST|Tax).*?:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+            elif "total" in kl:
+                pats = [
+                    r"Total\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Payable\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+            elif "price" in kl:
+                pats = [
+                    r"Price\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+            elif "amount" in kl:
+                pats = [
+                    r"Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Net Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+            else:
+                pats = [
+                    rf"{re.escape(k)}\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{{3}})?\s*([\d,]+(?:\.\d+)?)",
+                    rf"{re.escape(k.replace('_',' '))}\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{{3}})?\s*([\d,]+(?:\.\d+)?)",
+                ]
+
+            for p in pats:
                 m = re.search(p, text, re.I)
                 if m:
                     out[k] = float(m.group(1).replace(",", ""))
-                    found = True
                     break
-
-            if not found:
-                m = re.search(r"([\d,]+\.\d+|[\d,]+)", text)
-                if m:
-                    out[k] = float(m.group(1).replace(",", ""))
 
         # ---------- BOOLEAN ----------
         elif typ == "boolean":
