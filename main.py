@@ -816,8 +816,22 @@ async def dynamic_extract(request: Request):
             intent = intent_for_key(k)
             val = None
 
-            # 1) try by semantic intent (subtotal/tax/total/etc.)
-            if intent:
+            if intent == "tax":
+                # Negative lookbehind skips "Amount before tax: 5200" and matches
+                # the REAL "Tax (18%): 936" label instead.
+                tax_pat = (
+                    r"(?<!before )(?<!before)\b(?:GST|IGST|CGST|SGST|VAT|Duty|Tax)\b"
+                    r"(?:\s*Amount)?"
+                    r"(?:\s*\(\d+(?:\.\d+)?%?\))?"      # optional "(18%)"
+                    r"\s*[:=]\s*"
+                    r"(?:Rs\.?|INR|₹|\$|€|£|[A-Z]{3})?\s*"
+                    r"([\d,]+(?:\.\d+)?)"
+                )
+                m = re.search(tax_pat, text, re.I)
+                if m:
+                    val = m.group(1)
+
+            elif intent:
                 val = _num_after_label(text, FLOAT_LABELS[intent])
 
             # 2) try the literal schema key / spaced key as a label
@@ -826,8 +840,11 @@ async def dynamic_extract(request: Request):
                     text, re.escape(k) + "|" + re.escape(k.replace("_", " "))
                 )
 
-            # 3) last resort: any of the common financial labels, in priority order
-            if val is None:
+            # 3) last resort — ONLY for intents that aren't easily confused with a
+            #    sibling money field. tax/subtotal/total/amount are excluded:
+            #    grabbing the wrong one is worse than leaving it null.
+            SAFE_FALLBACK_INTENTS = {"price", "discount", "quantity"}
+            if val is None and (intent is None or intent in SAFE_FALLBACK_INTENTS):
                 for label in FLOAT_LABELS.values():
                     val = _num_after_label(text, label)
                     if val is not None:
