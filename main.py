@@ -380,6 +380,8 @@ async def dynamic_extract(request: Request):
                 r"Customer\s*:\s*(.+)",
                 r"Customer Name\s*:\s*(.+)",
                 r"Name\s*:\s*(.+)",
+                r"Product\s*:\s*(.+)",
+                r"Item\s*:\s*(.+)",
                 r"Vendor\s*:\s*(.+)",
                 r"From\s*:\s*(.+)",
                 r"Store\s*:\s*(.+)",
@@ -392,16 +394,15 @@ async def dynamic_extract(request: Request):
                 m = re.search(p, text, re.I)
                 if m:
                     val = m.group(1).strip()
-                    if k.lower() in ("customer", "customer_name", "name"):
-                        val = re.split(
-                            r"\.\s*(?:Product|Qty|Quantity|Price|Amount|Purchased|Purchase Date|Store|Vendor|Date)\s*:",
-                            val,
-                            maxsplit=1,
-                            flags=re.I,
-                        )[0]
+
+                    # Cut off when the next field starts
+                    val = re.split(
+                        r"\.\s*[A-Z][A-Za-z ]+\s*:",
+                        val,
+                        maxsplit=1
+                    )[0]
 
                     out[k] = val.strip().rstrip(".")
-
                     break
 
         # ---------- INTEGER ----------
