@@ -195,6 +195,28 @@ async def extract(request: Request):
                 out["invoice_no"] = val.strip()
                 print("MATCHED:", repr(val))
                 break
+
+                        # date
+        if not out.get("date"):
+            m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+            if m:
+                out["date"] = m.group(1)
+            else:
+                m = re.search(
+                    r"\b(\d{1,2}\s+[A-Za-z]+\s+\d{4}|[A-Za-z]+\s+\d{1,2}\s+\d{4})\b",
+                    text,
+                )
+                if m:
+                    from datetime import datetime
+
+                    s = m.group(1)
+
+                    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y"):
+                        try:
+                            out["date"] = datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                            break
+                        except ValueError:
+                            pass
 # vendor
         if not out.get("vendor"):
             m = re.search(r"Vendor\s*:\s*(.+)", text, re.I)
@@ -231,9 +253,7 @@ async def extract(request: Request):
                 out["currency"] = "EUR"
 
         keys = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
-        print("BODY KEYS:", body.keys())
-        print("TEXT START:", text[:200])
-        print("OUT:", out)
+        
         return {k: out.get(k) for k in keys}
 
     # ---- Q7: structured extraction (body has "text" + "schema") ----
