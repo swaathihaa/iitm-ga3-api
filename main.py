@@ -436,12 +436,15 @@ async def dynamic_extract(request: Request):
             if "subtotal" in kl:
                 pats = [
                     r"Subtotal\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Amount\s+before\s+tax\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
                     r"Net Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
                     r"Services rendered\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
                 ]
+
             elif "tax" in kl or "gst" in kl:
                 pats = [
-                    r"(?:GST|IGST|CGST|SGST|Tax).*?:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"(?:GST|IGST|CGST|SGST)\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
+                    r"Tax\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
                 ]
             elif "total" in kl:
                 pats = [
