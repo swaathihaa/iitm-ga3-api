@@ -107,6 +107,15 @@ def normalize_answer(ans):
     return s
 
 
+last_image_calls = []   # debug history for /answer-image
+
+@app.get("/answer-image-debug")
+def get_answer_image_debug():
+    """See recent /answer-image calls: question, raw model output, error, final answer.
+    Open https://<your-url>/answer-image-debug in a browser. Newest first."""
+    return {"count": len(last_image_calls), "calls": list(reversed(last_image_calls))}
+
+
 @app.post("/answer-image")
 async def answer_image(request: Request):
     body = await request.json()
@@ -142,22 +151,32 @@ async def answer_image(request: Request):
         }
     ]
 
+    raw_out, err, ans = None, None, ""
     try:
-        out = parse_json(
-            await chat(
-                messages,
-                model=config.VISION_MODEL,
-                max_tokens=300
-            )
+        raw_out = await chat(
+            messages,
+            model=config.VISION_MODEL,
+            max_tokens=300
         )
-
+        out = parse_json(raw_out)
         ans = normalize_answer(out.get("answer", ""))
-
-    except Exception:
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
         ans = ""
 
+    last_image_calls.append({
+        "question": question,
+        "image_b64_len": len(img_b64),
+        "raw_model_output": raw_out,
+        "error": err,
+        "final_answer": str(ans),
+    })
+    if len(last_image_calls) > 50:
+        del last_image_calls[0]
+
     return {"answer": str(ans)}
-# ================= Q3 + Q7: /extract =================
+    
+    # ================= Q3 + Q7: /extract =================
 @app.post("/extract")
 async def extract(request: Request):
     body = await request.json()
