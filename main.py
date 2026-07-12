@@ -148,7 +148,13 @@ async def extract(request: Request):
 
     # ---- Q3: fixed-schema invoice (body has "invoice_text") ----
     if "invoice_text" in body:
-        text = body.get("invoice_text", "")
+        text = (
+            body.get("invoice_text")
+            or body.get("text")
+            or body.get("content")
+            or body.get("document")
+            or ""
+        )
         prompt = (
             "Extract these fields from the invoice text and return JSON with "
             "EXACTLY these keys: invoice_no, date, vendor, amount, tax, currency.\n"
@@ -215,6 +221,9 @@ async def extract(request: Request):
                 out["currency"] = "EUR"
 
         keys = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
+        print("BODY KEYS:", body.keys())
+        print("TEXT START:", text[:200])
+        print("OUT:", out)
         return {k: out.get(k) for k in keys}
 
     # ---- Q7: structured extraction (body has "text" + "schema") ----
