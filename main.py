@@ -413,9 +413,27 @@ async def dynamic_extract(request: Request):
 
         # ---------- FLOAT ----------
         elif typ == "float":
-            m = re.search(r"([\d,]+\.\d+|[\d,]+)", text)
-            if m:
-                out[k] = float(m.group(1).replace(",", ""))
+            patterns = [
+                rf"{re.escape(k)}\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                rf"{re.escape(k.replace('_',' '))}\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Price\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Amount\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Cost\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Total\s*:\s*(?:Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+            ]
+
+            found = False
+            for p in patterns:
+                m = re.search(p, text, re.I)
+                if m:
+                    out[k] = float(m.group(1).replace(",", ""))
+                    found = True
+                    break
+
+            if not found:
+                m = re.search(r"([\d,]+\.\d+|[\d,]+)", text)
+                if m:
+                    out[k] = float(m.group(1).replace(",", ""))
 
         # ---------- BOOLEAN ----------
         elif typ == "boolean":
