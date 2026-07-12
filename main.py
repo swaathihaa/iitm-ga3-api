@@ -414,6 +414,8 @@ async def dynamic_extract(request: Request):
         # ---------- FLOAT ----------
         elif typ == "float":
             kl = k.lower()
+            print("FLOAT KEY =", k)
+            print("TEXT =", text)
 
             if "subtotal" in kl:
                 pats = [
@@ -448,6 +450,7 @@ async def dynamic_extract(request: Request):
             for p in pats:
                 m = re.search(p, text, re.I)
                 if m:
+                    print("MATCH FLOAT:", k, "->", m.group(1))   
                     out[k] = float(m.group(1).replace(",", ""))
                     break
 
