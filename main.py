@@ -219,9 +219,17 @@ async def extract(request: Request):
                             pass
 # vendor
         if not out.get("vendor"):
-            m = re.search(r"Vendor\s*:\s*(.+)", text, re.I)
-            if m:
-                out["vendor"] = m.group(1).strip()
+            patterns = [
+                r"Vendor\s*:\s*(.+)",
+                r"From\s*:\s*(.+)",
+                r"Supplier\s*:\s*(.+)"
+            ]
+
+            for p in patterns:
+                m = re.search(p, text, re.I)
+                if m:
+                    out["vendor"] = m.group(1).strip()
+                    break
 
         # subtotal
         if not out.get("amount"):
