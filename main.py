@@ -231,15 +231,21 @@ async def extract(request: Request):
                     out["vendor"] = m.group(1).strip()
                     break
 
-        # subtotal
+        # amount (before tax)
         if not out.get("amount"):
-            m = re.search(
-                r"(?:Subtotal|Sub Total)\s*:\s*(?:Rs\.?|₹|\$)?\s*([\d,]+(?:\.\d+)?)",
-                text,
-                re.I,
-            )
-            if m:
-                out["amount"] = float(m.group(1).replace(",", ""))
+            patterns = [
+                r"(?:Subtotal|Sub Total)\s*:\s*(?:[A-Z]{3}|Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Net Amount\s*:\s*(?:[A-Z]{3}|Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Services rendered\s*:\s*(?:[A-Z]{3}|Rs\.?|₹|\$|€)?\s*([\d,]+(?:\.\d+)?)",
+                r"Service\s*:.*?(?:[A-Z]{3}|Rs\.?|₹|\$|€)\s*([\d,]+(?:\.\d+)?)"
+            ]
+
+            for p in patterns:
+                m = re.search(p, text, re.I)
+                if m:
+                    out["amount"] = float(m.group(1).replace(",", ""))
+                    break
+
 
         # tax
         if not out.get("tax"):
