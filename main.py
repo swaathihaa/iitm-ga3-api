@@ -174,7 +174,7 @@ async def extract(request: Request):
 
                # invoice number
         patterns = [
-            r"\bINV[-A-Za-z0-9/]+\b",
+            r"\bINV(?:-[A-Za-z0-9]+)+\b",
             r"\b[A-Z]{2,5}-\d{3,}\b",
             r"\b[A-Z]{2,5}/\d{4}/\d+\b",
             r"\b[A-Z]{2,5}-\d{4}-\d+\b",
@@ -193,6 +193,7 @@ async def extract(request: Request):
                     continue
 
                 out["invoice_no"] = val.strip()
+                print("MATCHED:", repr(val))
                 break
 # vendor
         if not out.get("vendor"):
