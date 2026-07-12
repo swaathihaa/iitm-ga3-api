@@ -692,6 +692,30 @@ def coerce(value, typ):
     except Exception:
         return None
 
+
+def _num_after_label(text, label_pattern, allow_percent_paren=True):
+    """Find a number following a label. Colon/equals optional, no newline
+    requirement, currency symbol optional."""
+    paren = r"\s*(?:\(\d+(?:\.\d+)?%?\))?" if allow_percent_paren else ""
+    pat = (
+        rf"\b(?:{label_pattern})\b{paren}\s*(?:Amount|Amt)?\s*"
+        r"[:=]?\s*(?:Rs\.?|INR|₹|\$|€|£|[A-Z]{3})?\s*"
+        r"([\d,]+(?:\.\d+)?)"
+    )
+    m = re.search(pat, text, re.I)
+    return m.group(1) if m else None
+
+
+# ---- debug capture so we can see EXACTLY what text/schema produced a bad result ----
+last_dynamic_extract_calls = []
+
+@app.get("/dynamic-extract-debug")
+def get_dynamic_extract_debug():
+    """See the exact text/schema/LLM-output/final-output for recent /dynamic-extract
+    calls. Open https://<your>.hf.space/dynamic-extract-debug in a browser. Newest first."""
+    return {"count": len(last_dynamic_extract_calls), "calls": list(reversed(last_dynamic_extract_calls))}
+
+
 @app.post("/dynamic-extract")
 async def dynamic_extract(request: Request):
     body = await request.json()
@@ -707,12 +731,43 @@ async def dynamic_extract(request: Request):
         f"TEXT:\n{text}"
     )
 
+    llm_error = None
     try:
         out = parse_json(await chat([{"role": "user", "content": prompt}]))
-    except Exception:
+    except Exception as e:
         out = {}
+        llm_error = str(e)
 
     from datetime import datetime
+
+    # Label synonyms used by the float fallback, keyed by intent.
+    FLOAT_LABELS = {
+        "subtotal": r"Subtotal|Sub[\s-]?Total|Net Amount|Amount before tax|Services rendered",
+        "tax": r"GST|IGST|CGST|SGST|VAT|Tax(?:\s*Amount)?|Duty",
+        "total": r"Total|Grand Total|Payable|Total Amount|Amount Payable",
+        "price": r"Price|Unit Price|Rate",
+        "amount": r"Amount|Net Amount|Amt",
+        "discount": r"Discount|Rebate",
+        "quantity": r"Quantity|Qty",
+    }
+
+    def intent_for_key(k):
+        kl = k.lower()
+        if "subtotal" in kl or "sub_total" in kl:
+            return "subtotal"
+        if "tax" in kl or "gst" in kl or "vat" in kl or "duty" in kl:
+            return "tax"
+        if "total" in kl:
+            return "total"
+        if "discount" in kl or "rebate" in kl:
+            return "discount"
+        if "price" in kl or "rate" in kl:
+            return "price"
+        if "qty" in kl or "quantity" in kl:
+            return "quantity"
+        if "amount" in kl:
+            return "amount"
+        return None
 
     for k in keys:
         if out.get(k) is not None:
@@ -723,93 +778,69 @@ async def dynamic_extract(request: Request):
         # ---------- STRING ----------
         if typ == "string":
             patterns = [
-                rf"{re.escape(k)}\s*:\s*(.+)",
-                rf"{re.escape(k.replace('_',' '))}\s*:\s*(.+)",
-                r"Customer\s*:\s*(.+)",
-                r"Customer Name\s*:\s*(.+)",
-                r"Name\s*:\s*(.+)",
-                r"Product\s*:\s*(.+)",
-                r"Item\s*:\s*(.+)",
-                r"Vendor\s*:\s*(.+)",
-                r"From\s*:\s*(.+)",
-                r"Store\s*:\s*(.+)",
-                r"Team\s*:\s*(.+)",
-                r"Severity\s*:\s*(.+)",
-                r"Root cause\s*:\s*(.+)"
+                rf"{re.escape(k)}\s*[:=]\s*(.+)",
+                rf"{re.escape(k.replace('_', ' '))}\s*[:=]\s*(.+)",
+                r"Customer\s*[:=]\s*(.+)",
+                r"Customer Name\s*[:=]\s*(.+)",
+                r"Name\s*[:=]\s*(.+)",
+                r"Product\s*[:=]\s*(.+)",
+                r"Item\s*[:=]\s*(.+)",
+                r"Vendor\s*[:=]\s*(.+)",
+                r"From\s*[:=]\s*(.+)",
+                r"Store\s*[:=]\s*(.+)",
+                r"Team\s*[:=]\s*(.+)",
+                r"Severity\s*[:=]\s*(.+)",
+                r"Root cause\s*[:=]\s*(.+)",
             ]
 
             for p in patterns:
                 m = re.search(p, text, re.I)
                 if m:
                     val = m.group(1).strip()
-
-                    # Cut off when the next field starts
-                    val = re.split(
-                        r"\.\s*[A-Z][A-Za-z ]+\s*:",
-                        val,
-                        maxsplit=1
-                    )[0]
-
+                    val = re.split(r"\.\s*[A-Z][A-Za-z ]+\s*:", val, maxsplit=1)[0]
                     out[k] = val.strip().rstrip(".")
                     break
 
         # ---------- INTEGER ----------
         elif typ == "integer":
-            m = re.search(r"\b(\d+)\b", text)
+            m = re.search(
+                rf"{re.escape(k.replace('_', ' '))}\s*[:=]?\s*(\d+)", text, re.I
+            )
+            if not m:
+                m = re.search(r"\b(\d+)\b", text)
             if m:
                 out[k] = int(m.group(1))
 
         # ---------- FLOAT ----------
         elif typ == "float":
-            kl = k.lower()
-            print("FLOAT KEY =", k)
-            print("TEXT =", text)
+            intent = intent_for_key(k)
+            val = None
 
-            if "subtotal" in kl:
-                pats = [
-                    r"Subtotal\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Amount\s+before\s+tax\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Net Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Services rendered\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                ]
+            # 1) try by semantic intent (subtotal/tax/total/etc.)
+            if intent:
+                val = _num_after_label(text, FLOAT_LABELS[intent])
 
-            elif "tax" in kl or "gst" in kl:
-                pats = [
-                    r"(?:GST|IGST|CGST|SGST)\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"\n\s*Tax\s*(?:\(\d+%?\))?\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                ]
-            elif "total" in kl:
-                pats = [
-                    r"Total\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Payable\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                ]
-            elif "price" in kl:
-                pats = [
-                    r"Price\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                ]
-            elif "amount" in kl:
-                pats = [
-                    r"Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                    r"Net Amount\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{3})?\s*([\d,]+(?:\.\d+)?)",
-                ]
-            else:
-                pats = [
-                    rf"{re.escape(k)}\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{{3}})?\s*([\d,]+(?:\.\d+)?)",
-                    rf"{re.escape(k.replace('_',' '))}\s*:\s*(?:Rs\.?|₹|\$|€|[A-Z]{{3}})?\s*([\d,]+(?:\.\d+)?)",
-                ]
+            # 2) try the literal schema key / spaced key as a label
+            if val is None:
+                val = _num_after_label(
+                    text, re.escape(k) + "|" + re.escape(k.replace("_", " "))
+                )
 
-            for p in pats:
-                m = re.search(p, text, re.I)
-                if m:
-                    print("MATCH FLOAT:", k, "->", m.group(1))   
-                    out[k] = float(m.group(1).replace(",", ""))
-                    break
+            # 3) last resort: any of the common financial labels, in priority order
+            if val is None:
+                for label in FLOAT_LABELS.values():
+                    val = _num_after_label(text, label)
+                    if val is not None:
+                        break
+
+            if val is not None:
+                out[k] = float(val.replace(",", ""))
 
         # ---------- BOOLEAN ----------
         elif typ == "boolean":
-            if re.search(r"\b(true|yes)\b", text, re.I):
+            if re.search(r"\b(true|yes|paid)\b", text, re.I):
                 out[k] = True
-            elif re.search(r"\b(false|no)\b", text, re.I):
+            elif re.search(r"\b(false|no|unpaid)\b", text, re.I):
                 out[k] = False
 
         # ---------- DATE ----------
@@ -831,8 +862,20 @@ async def dynamic_extract(request: Request):
                         except ValueError:
                             pass
 
-    return {k: coerce(out.get(k), schema[k]) for k in keys}
+    result = {k: coerce(out.get(k), schema[k]) for k in keys}
 
+    # --- record this call so we can inspect exactly what happened ---
+    last_dynamic_extract_calls.append({
+        "text": text,
+        "schema": schema,
+        "llm_error": llm_error,
+        "llm_raw_out": out,
+        "final_result": result,
+    })
+    if len(last_dynamic_extract_calls) > 50:
+        del last_dynamic_extract_calls[0]
+
+    return result
 # ================= Q6: /answer-audio =================
 last_debug_info = {}
 last_audio_bytes = b""          # raw audio the grader last sent (for download)
