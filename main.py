@@ -166,11 +166,19 @@ async def extract(request: Request):
 
 # -------- deterministic fixes --------
 
-# invoice number
-        m = re.search(r"\bINV[-A-Za-z0-9/]+\b", text, re.I)
-        if m:
-            out["invoice_no"] = m.group(0)
+        # invoice number
+        patterns = [
+            r"\bINV[-A-Za-z0-9/]+\b",
+            r"\b[A-Z]{2,5}[/-]\d{4}[/-]\d+\b",
+            r"Invoice\s*(?:No\.?|Number|#|ID)?\s*[:#]?\s*([A-Za-z0-9/-]+)",
+            r"Ref\s*[:#]?\s*([A-Za-z0-9/-]+)"
+        ]
 
+        for p in patterns:
+            m = re.search(p, text, re.I)
+            if m:
+                out["invoice_no"] = m.group(1) if m.lastindex else m.group(0)
+                break
 # vendor
         if not out.get("vendor"):
             m = re.search(r"Vendor\s*:\s*(.+)", text, re.I)
