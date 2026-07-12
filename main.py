@@ -391,7 +391,17 @@ async def dynamic_extract(request: Request):
             for p in patterns:
                 m = re.search(p, text, re.I)
                 if m:
-                    out[k] = m.group(1).strip().rstrip(".")
+                    val = m.group(1).strip()
+                    if k.lower() in ("customer", "customer_name", "name"):
+                        val = re.split(
+                            r"\.\s*(?:Product|Qty|Quantity|Price|Amount|Purchased|Purchase Date|Store|Vendor|Date)\s*:",
+                            val,
+                            maxsplit=1,
+                            flags=re.I,
+                        )[0]
+
+                    out[k] = val.strip().rstrip(".")
+
                     break
 
         # ---------- INTEGER ----------
