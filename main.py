@@ -88,58 +88,74 @@ async def root():
     return {"ok": True, "email": config.EMAIL}
 # ================= Q2: /answer-image =================
 def normalize_answer(ans):
-    """Clean a vision answer so it matches the grader's expected string.
-    Numeric answers: strip currency/commas/units, keep the bare number.
-    Text answers (e.g. a category name): keep as-is, trimmed."""
+    """Normalize answers to match the grader format."""
     s = str(ans).strip()
     if not s:
         return s
-    # If it looks numeric once symbols/commas/spaces are removed, return the number.
+
     cleaned = re.sub(r"[,\s]", "", s)
     cleaned = re.sub(r"[₹$€£%]", "", cleaned)
+
     m = re.search(r"-?\d+(?:\.\d+)?", cleaned)
-    if m and re.fullmatch(r"[^\dA-Za-z]*-?\d[\d,.\s₹$€£%]*", s.strip()):
+
+    if m and re.fullmatch(r"[^\dA-Za-z]*-?\d[\d,.\s₹$€£%]*", s):
         num = m.group(0)
-        # drop trailing ".0" so 240.0 -> 240 (matches integer-style expected values)
         if "." in num:
             num = num.rstrip("0").rstrip(".")
         return num
+
     return s
+
 
 @app.post("/answer-image")
 async def answer_image(request: Request):
     body = await request.json()
+
     img_b64 = body.get("image_base64", "")
     question = body.get("question", "")
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text":
-                "You read charts, receipts, tables, invoices and pie charts EXACTLY.\n"
-                "Work in steps in a 'work' field, then give the final 'answer':\n"
-                "1. TRANSCRIBE every relevant label and number you see, one by one "
-                "(e.g. each bar's value, each receipt line, each table cell). Read "
-                "digits carefully; do not round or estimate.\n"
-                "2. If the question needs arithmetic (sum of all bars, grand total, "
-                "max/min of a column, total including tax), compute it step by step "
-                "and DOUBLE-CHECK the sum by re-adding.\n"
-                "3. Final 'answer': if NUMERIC, output ONLY the bare number — no "
-                "currency symbol, no thousands separators, no units, no words. Keep "
-                "decimals exactly as shown (e.g. a money total 4089.35 stays 4089.35). "
-                "If TEXT (e.g. the largest pie category), output it EXACTLY as written "
-                "in the image.\n"
-                "Return JSON: {\"work\": \"...\", \"answer\": \"...\"}.\n"
-                f"Question: {question}"},
-            {"type": "image_url",
-             "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "high"}},
-        ],
-    }]
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text":
+                        "You are an expert OCR and document-reading AI.\n"
+                        "You accurately read receipts, invoices, charts, tables, bar graphs and pie charts.\n"
+                        "Read every visible number and label carefully.\n"
+                        "If calculation is needed, perform it accurately.\n"
+                        "If the answer is numeric, return ONLY the number without currency symbols, commas or units.\n"
+                        "If the answer is text, return it exactly as written in the image.\n"
+                        "Return ONLY valid JSON in exactly this format:\n"
+                        "{\"answer\":\"...\"}\n\n"
+                        f"Question: {question}"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{img_b64}",
+                        "detail": "high"
+                    }
+                }
+            ]
+        }
+    ]
+
     try:
-        # Full gpt-4o at high image detail reads small chart/receipt labels accurately.
-        out = parse_json(await chat(messages, model=config.VISION_MODEL, max_tokens=1200))
+        out = parse_json(
+            await chat(
+                messages,
+                model=config.VISION_MODEL,
+                max_tokens=300
+            )
+        )
+
         ans = normalize_answer(out.get("answer", ""))
-    except Exception as e:
+
+    except Exception:
         ans = ""
+
     return {"answer": str(ans)}
 # ================= Q3 + Q7: /extract =================
 @app.post("/extract")
